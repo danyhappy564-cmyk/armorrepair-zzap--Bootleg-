@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace RaidArmorRepair
 {
-    [BepInPlugin("com.pineapplelover.raidarmorrepair", "Raid Armor Repair", "1.2.0")]
+    [BepInPlugin("com.pineapplelover.raidarmorrepair", "Raid Armor Repair", "1.3.0")]
     public class Plugin : BaseUnityPlugin
     {
         /// <summary>The objectives panel needs a GamePlayerOwner. It is not always up the
@@ -54,8 +54,8 @@ namespace RaidArmorRepair
             KitResourceCostPerUse = Config.Bind("General", "KitResourceCostPerUse", 20f,
                 "1틱당 소모되는 수리킷 자원(Resource) 수치");
 
-            RepairTickInterval = Config.Bind("General", "RepairTickInterval", 5f,
-                new ConfigDescription("단축키를 누르고 있을 때 몇 초마다 한 번씩 수리할지",
+            RepairTickInterval = Config.Bind("General", "RepairTickInterval", 1f,
+                new ConfigDescription("단축키를 누르고 있을 때 몇 초마다 한 번씩 수리할지 (첫 틱은 키를 누르는 즉시 적용됩니다)",
                     new AcceptableValueRange<float>(1f, 30f)));
 
             IntellectMaxBonusMultiplier = Config.Bind("General", "IntellectMaxBonusMultiplier", 0.5f,
@@ -202,24 +202,49 @@ namespace RaidArmorRepair
             RepairService.IsRepairing = true;
             _repairTimer = 0f;
             RepairService.NotifyRepairStart(player);
-            ShowProgressPanel(player);
+
+            // Field report (2026-09): holding the key felt unresponsive - press it and
+            // nothing visibly happens for a full RepairTickInterval. Apply the first tick
+            // immediately instead of waiting for Update()'s timer to reach it, so the key
+            // repairs right away and then keeps going on the normal cadence for as long as
+            // it's held. TryRepairArmor is the exact same call the periodic tick makes -
+            // it already updates durability/kit resource and is safe to call here too.
+            if (RepairService.TryRepairArmor(player))
+            {
+                ShowProgressPanel(player);
+            }
+            else
+            {
+                // The immediate tick already finished the job (or the kit ran out on it) -
+                // nothing left to wait for. NotifySessionEnd only fires if that tick actually
+                // healed something, so a same-press "시작합니다" + "종료: +X" pair is expected
+                // and correct, not a duplicate message.
+                ResetRepairState();
+            }
         }
 
         /// <summary>
         /// The vanilla panel (EFT.UI.BattleUIPanelExtraction) closes itself once the duration
         /// passed to Show() runs out - confirmed by decompiling the client, present in both 4.0
         /// and 4.1, not something this mod controls. We re-show it every RepairTickInterval, so
-        /// passing exactly that value as the duration means our refresh and the panel's own
-        /// auto-close are scheduled to land on the same frame. Our refresh calls StopCoroutine on
-        /// the old countdown before it gets a chance to run again that frame, so this should not
-        /// race in the normal case - but if a tick's TryRepairArmor call ever throws (see the
-        /// remarks on TryRepairArmor) or any other frame hiccups, there is nothing left to stop
-        /// the vanilla timer, and the panel closes on schedule with no visible explanation. The
-        /// margin below buys slack against exactly that: the panel now outlives one full tick
-        /// even if a single refresh is missed, instead of closing the instant it is due.
+        /// passing exactly that value as the duration keeps the displayed countdown on the same
+        /// clock as the real time to the next tick - the number shown is the number that's true.
+        ///
+        /// This used to carry a flat +2s margin (see the README's "복원한 부분" / bug-fix
+        /// notes) so the panel would outlive a missed refresh - an exception mid-tick, or a
+        /// dropped frame - instead of the vanilla auto-close firing with no explanation.
+        /// Field report (2026-09): the margin worked, but it also meant the countdown read
+        /// 2 seconds ahead of the real remaining time on every single tick, not just the rare
+        /// one it was guarding against - press J with 4s actually left and the panel said 6s.
+        /// That guard is redundant now anyway: TryRepairArmor (RepairService.cs) already
+        /// catches everything a tick can throw and returns false instead of letting it escape,
+        /// which routes straight back to ResetRepairState()/ClosePanel() here rather than
+        /// leaving the vanilla auto-close to fire on its own. So the margin was paying for a
+        /// race that can no longer happen, at the cost of a countdown that was wrong every
+        /// time it was shown. Removed; if a future change reopens that race, fix it by closing
+        /// the panel explicitly on the failure path (which ResetRepairState already does),
+        /// not by re-inflating the displayed number.
         /// </summary>
-        private const float PanelDurationMargin = 2f;
-
         private void ShowProgressPanel(Player player)
         {
             if (_owner == null)
@@ -231,7 +256,7 @@ namespace RaidArmorRepair
             {
                 _owner.ShowObjectivesPanel(
                     RepairService.BuildProgressLabel(RepairService.Peek(player)),
-                    RepairTickInterval.Value + PanelDurationMargin);
+                    RepairTickInterval.Value);
                 _panelShown = true;
             }
             catch (Exception ex)
