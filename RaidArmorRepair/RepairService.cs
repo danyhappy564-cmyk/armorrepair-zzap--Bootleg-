@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
+using Comfort.Common;
 using EFT;
 using EFT.Communications;
 using EFT.InventoryLogic;
+using EFT.UI;
 
 namespace RaidArmorRepair
 {
@@ -39,6 +40,9 @@ namespace RaidArmorRepair
         /// Higher is easier to repair, and it feeds the max-durability loss: ceramic and
         /// glass wear out fast, steel and UHMWPE barely at all.
         /// </summary>
+        /// <remarks>Keyed by the 4.1 EArmorMaterial enum (UHMWPE, Aramid, Combined, Titan,
+        /// Aluminium, ArmoredSteel, Ceramic, Glass); the extra spellings are harmless leftovers
+        /// from when this was read by reflection.</remarks>
         private static readonly Dictionary<string, float> ArmorMaterialEfficiency =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
             {
@@ -57,16 +61,43 @@ namespace RaidArmorRepair
                 { "Glass", 0.15f },
             };
 
+        /// <summary>Korean names for the armour slots plates and soft inserts sit in. Slot ids
+        /// come from the item database; anything not listed falls back to the raw id.</summary>
+        private static readonly Dictionary<string, string> ArmorSlotNames =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "Front_plate", "앞판" },
+                { "Back_plate", "뒷판" },
+                { "Left_side_plate", "왼쪽 측면판" },
+                { "Right_side_plate", "오른쪽 측면판" },
+                { "Soft_armor_front", "앞 연질" },
+                { "Soft_armor_back", "뒤 연질" },
+                { "Soft_armor_left", "왼쪽 연질" },
+                { "Soft_armor_right", "오른쪽 연질" },
+                { "Collar", "목" },
+                { "Groin", "골반(앞)" },
+                { "Groin_back", "골반(뒤)" },
+                { "Shoulder_l", "왼쪽 어깨" },
+                { "Shoulder_r", "오른쪽 어깨" },
+                { "Helmet_top", "정수리" },
+                { "Helmet_back", "뒤통수" },
+                { "Helmet_ears", "귀" },
+                { "Helmet_eyes", "눈" },
+                { "Helmet_jaw", "턱" },
+            };
+
         public static bool IsRepairing;
         public static float SessionKitResourceUsed;
         public static float SessionDurabilityRepaired;
 
-        private static bool _loggedMaterialFallback;
+        /// <summary>Durability restored per part this session, in the order first repaired.</summary>
+        private static readonly List<KeyValuePair<string, float>> SessionParts = new List<KeyValuePair<string, float>>();
+
+        private static bool _loggedSoundFailure;
 
         public static void NotifyRepairStart(Player player)
         {
-            SessionKitResourceUsed = 0f;
-            SessionDurabilityRepaired = 0f;
+            ResetSession();
             Notify(player, $"방어구 수리를 시작합니다. 단축키를 누르고 있으면 {Plugin.RepairTickInterval.Value:0.#}초마다 수리됩니다.");
         }
 
@@ -77,9 +108,33 @@ namespace RaidArmorRepair
                 return;
             }
 
-            Notify(player, $"방어구 수리 종료: 내구도 +{SessionDurabilityRepaired:0.#} 회복, 수리킷 {SessionKitResourceUsed:0.#} 소모");
+            string parts = SessionParts.Count > 0
+                ? " [" + string.Join(", ", SessionParts.Select(p => $"{p.Key} +{p.Value:0.#}")) + "]"
+                : "";
+
+            Notify(player, $"방어구 수리 종료: 내구도 +{SessionDurabilityRepaired:0.#} 회복, 수리킷 {SessionKitResourceUsed:0.#} 소모{parts}");
+            ResetSession();
+        }
+
+        private static void ResetSession()
+        {
             SessionKitResourceUsed = 0f;
             SessionDurabilityRepaired = 0f;
+            SessionParts.Clear();
+        }
+
+        private static void AddSessionPart(string label, float heal)
+        {
+            for (int i = 0; i < SessionParts.Count; i++)
+            {
+                if (SessionParts[i].Key == label)
+                {
+                    SessionParts[i] = new KeyValuePair<string, float>(label, SessionParts[i].Value + heal);
+                    return;
+                }
+            }
+
+            SessionParts.Add(new KeyValuePair<string, float>(label, heal));
         }
 
         // ---- skill ---------------------------------------------------------
@@ -129,38 +184,25 @@ namespace RaidArmorRepair
         }
 
         /// <summary>
-        /// Reads the armour's material off its template. The property name has moved between
-        /// EFT builds, so both known spellings are tried by reflection and an unknown value
-        /// falls back to the configured default rather than throwing.
+        /// Reads the armour's material off its component template. This used to go through
+        /// reflection on Item.Template with "Material" as a second guess — but in 4.1 that name
+        /// is the hit-effect MaterialType (BodyArmor, Helmet, ...), not the armour material, so
+        /// the fallback could only ever produce a wrong lookup. 4.1 exposes the real value
+        /// directly as IArmorComponentTemplate.ArmorMaterial (EArmorMaterial).
         /// </summary>
         private static float GetArmorMaterialEfficiency(ArmorComponent armorComponent)
         {
-            string[] candidates = { "ArmorMaterial", "Material" };
-
             try
             {
-                object template = armorComponent?.Item?.Template;
-                if (template != null)
+                if (armorComponent?.Template != null)
                 {
-                    Type type = template.GetType();
-                    foreach (string name in candidates)
+                    string material = armorComponent.Template.ArmorMaterial.ToString();
+                    if (ArmorMaterialEfficiency.TryGetValue(material, out float efficiency))
                     {
-                        object value = type.GetProperty(name)?.GetValue(template)
-                                       ?? type.GetField(name)?.GetValue(template);
-                        if (value == null)
-                        {
-                            continue;
-                        }
-
-                        string material = value.ToString();
-                        if (ArmorMaterialEfficiency.TryGetValue(material, out float efficiency))
-                        {
-                            return efficiency;
-                        }
-
-                        Plugin.Log.LogWarning($"[RaidArmorRepair] 표에 없는 방어구 재질 '{material}', 기본 효율({Plugin.DefaultArmorMaterialEfficiency.Value})을 사용합니다.");
-                        return Plugin.DefaultArmorMaterialEfficiency.Value;
+                        return efficiency;
                     }
+
+                    Plugin.Log.LogWarning($"[RaidArmorRepair] 표에 없는 방어구 재질 '{material}', 기본 효율({Plugin.DefaultArmorMaterialEfficiency.Value})을 사용합니다.");
                 }
             }
             catch (Exception ex)
@@ -168,15 +210,17 @@ namespace RaidArmorRepair
                 Plugin.Log.LogWarning("[RaidArmorRepair] 방어구 재질 조회 실패: " + ex.Message);
             }
 
-            // Once per session: repeating this for every tick on every plate would flood the log.
-            if (!_loggedMaterialFallback)
-            {
-                _loggedMaterialFallback = true;
-                Plugin.Log.LogWarning($"[RaidArmorRepair] 방어구의 재질 필드를 찾지 못해 기본 효율({Plugin.DefaultArmorMaterialEfficiency.Value})을 사용합니다.");
-            }
-
             return Plugin.DefaultArmorMaterialEfficiency.Value;
         }
+
+        /// <summary>
+        /// Wear scales with how much of a full tick was actually used. Before 1.4.0 a tick that
+        /// restored a single point (armour at 99/100, or a nearly empty kit) cost the same full
+        /// MaxDurabilityLoss percent as a full tick — so topping off near-full armour with
+        /// default settings could take it from 99/100 to 60/60.
+        /// </summary>
+        private static float ScaleLossByHeal(float lossPercent, float heal, float healPerTick) =>
+            healPerTick > 0f ? lossPercent * Math.Max(0f, Math.Min(1f, heal / healPerTick)) : 0f;
 
         // ---- preview -------------------------------------------------------
 
@@ -186,7 +230,7 @@ namespace RaidArmorRepair
             var preview = default(RepairPreview);
             InventoryEquipment equipment = player.Inventory.Equipment;
 
-            if (!TryFindDamagedArmorInEquipment(equipment, out Item targetArmor, out ArmorComponent armorComponent, false))
+            if (!TryFindDamagedArmorInEquipment(equipment, out Item targetArmor, out ArmorComponent armorComponent, out string label, false))
             {
                 return preview;
             }
@@ -194,13 +238,14 @@ namespace RaidArmorRepair
             preview.HasTarget = true;
             preview.TargetArmor = targetArmor;
             preview.TargetComponent = armorComponent;
+            preview.TargetLabel = label;
 
             RepairableComponent repairable = armorComponent.Repairable;
             preview.MaxDurability = repairable.MaxDurability;
             preview.CurrentDurability = repairable.Durability;
             preview.MissingDurability = preview.MaxDurability - preview.CurrentDurability;
 
-            if (!TryFindRepairKit(equipment, out Item kitItem, out RepairKitComponent kitComponent, false))
+            if (!TryFindRepairKit(equipment, targetArmor, out Item kitItem, out RepairKitComponent kitComponent, false))
             {
                 return preview;
             }
@@ -223,8 +268,9 @@ namespace RaidArmorRepair
 
             if (Plugin.EnableMaxDurabilityDegradation.Value && preview.ExpectedHeal > 0f)
             {
-                preview.ExpectedMaxDurabilityLossPercent =
-                    GetMaxDurabilityLossPercent(intellectLevel, GetArmorMaterialEfficiency(armorComponent));
+                preview.ExpectedMaxDurabilityLossPercent = ScaleLossByHeal(
+                    GetMaxDurabilityLossPercent(intellectLevel, GetArmorMaterialEfficiency(armorComponent)),
+                    preview.ExpectedHeal, healPerTick);
             }
 
             return preview;
@@ -253,7 +299,8 @@ namespace RaidArmorRepair
                 ? $" · 최대내구도 -{preview.ExpectedMaxDurabilityLossPercent:0.#}%"
                 : "";
 
-            return $"방어구 수리 중 (예상 {percent:0}%{kitNote}{wearNote}) " + "{0:F1}s";
+            string target = string.IsNullOrEmpty(preview.TargetLabel) ? "방어구" : preview.TargetLabel;
+            return $"{target} 수리 중 (예상 {percent:0}%{kitNote}{wearNote}) " + "{0:F1}s";
         }
 
         // ---- the tick ------------------------------------------------------
@@ -293,13 +340,13 @@ namespace RaidArmorRepair
         {
             InventoryEquipment equipment = player.Inventory.Equipment;
 
-            if (!TryFindDamagedArmorInEquipment(equipment, out Item armorItem, out ArmorComponent armorComponent, true))
+            if (!TryFindDamagedArmorInEquipment(equipment, out Item armorItem, out ArmorComponent armorComponent, out string label, true))
             {
                 Notify(player, "수리할 방어구가 없거나 이미 최대 내구도입니다.");
                 return false;
             }
 
-            if (!TryFindRepairKit(equipment, out _, out RepairKitComponent kitComponent, true))
+            if (!TryFindRepairKit(equipment, armorItem, out Item kitItem, out RepairKitComponent kitComponent, true))
             {
                 Notify(player, "인벤토리에 사용 가능한 방어구 수리 키트가 없습니다.");
                 return false;
@@ -307,6 +354,7 @@ namespace RaidArmorRepair
 
             RepairableComponent repairable = armorComponent.Repairable;
             float maxDurability = repairable.MaxDurability;
+            float durabilityBefore = repairable.Durability;
             float intellectMultiplier = GetIntellectMultiplier(player);
 
             float missing = maxDurability - repairable.Durability;
@@ -331,7 +379,9 @@ namespace RaidArmorRepair
             float lossPercent = 0f;
             if (Plugin.EnableMaxDurabilityDegradation.Value && heal > 0f)
             {
-                lossPercent = GetMaxDurabilityLossPercent(GetIntellectLevel(player), GetArmorMaterialEfficiency(armorComponent));
+                lossPercent = ScaleLossByHeal(
+                    GetMaxDurabilityLossPercent(GetIntellectLevel(player), GetArmorMaterialEfficiency(armorComponent)),
+                    heal, healPerTick);
                 float lossPoints = maxDurability * (lossPercent / 100f);
                 if (lossPoints > 0f)
                 {
@@ -348,6 +398,7 @@ namespace RaidArmorRepair
 
             SessionKitResourceUsed += resourceUsed;
             SessionDurabilityRepaired += heal;
+            AddSessionPart(label, heal);
 
             // Durability/resource are already updated above regardless of what happens here — this
             // is only telling the UI to redraw. armorItem can be a plate nested inside the vest's
@@ -363,7 +414,28 @@ namespace RaidArmorRepair
                 Plugin.Log.LogWarning("[RaidArmorRepair] RaiseRefreshEvent 실패 (내구도는 이미 적용됨, UI만 안 갱신될 수 있음): " + ex.Message);
             }
 
-            Plugin.Log.LogInfo($"[RaidArmorRepair] 틱 적용: +{heal:0.#} 내구도, 수리킷 -{resourceUsed:0.#}, 지력 보너스 x{intellectMultiplier:0.00}, 최대내구도 -{lossPercent:0.#}%");
+            // The kit's remaining resource changed too; without this its tooltip stays stale.
+            try
+            {
+                kitItem.RaiseRefreshEvent(false, false);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[RaidArmorRepair] 수리킷 RaiseRefreshEvent 실패 (자원은 이미 차감됨): " + ex.Message);
+            }
+
+            Plugin.Log.LogInfo($"[RaidArmorRepair] 틱 적용: {label} +{heal:0.#} 내구도, 수리킷 -{resourceUsed:0.#}, 지력 보너스 x{intellectMultiplier:0.00}, 최대내구도 -{lossPercent:0.#}%");
+
+            if (heal > 0f)
+            {
+                if (Plugin.ShowTickDetails.Value)
+                {
+                    Notify(player, BuildTickMessage(label, durabilityBefore, repairable.Durability, maxDurability,
+                        repairable.MaxDurability, resourceUsed, kitComponent.Resource));
+                }
+
+                PlayRepairSound();
+            }
 
             return HasAnyDamagedArmor(equipment);
         }
@@ -371,10 +443,10 @@ namespace RaidArmorRepair
         // ---- lookups -------------------------------------------------------
 
         private static bool HasAnyDamagedArmor(InventoryEquipment equipment) =>
-            TryFindDamagedArmorInEquipment(equipment, out _, out _, false);
+            TryFindDamagedArmorInEquipment(equipment, out _, out _, out _, false);
 
         private static bool TryFindDamagedArmorInEquipment(
-            InventoryEquipment equipment, out Item targetItem, out ArmorComponent targetComponent, bool verboseLog)
+            InventoryEquipment equipment, out Item targetItem, out ArmorComponent targetComponent, out string label, bool verboseLog)
         {
             foreach (EquipmentSlot slotId in ArmorSlots)
             {
@@ -389,7 +461,7 @@ namespace RaidArmorRepair
                     Plugin.Log.LogInfo($"[RaidArmorRepair] 슬롯 {slotId}: {item.TemplateId} 확인 중...");
                 }
 
-                if (TryFindDamagedArmor(item, out targetItem, out targetComponent))
+                if (TryFindDamagedArmor(item, out targetItem, out targetComponent, out label))
                 {
                     return true;
                 }
@@ -397,40 +469,119 @@ namespace RaidArmorRepair
 
             targetItem = null;
             targetComponent = null;
+            label = null;
             return false;
         }
 
         /// <summary>The item itself if it is damaged armour, otherwise the first damaged
         /// plate inside it.</summary>
-        private static bool TryFindDamagedArmor(Item equippedItem, out Item targetItem, out ArmorComponent targetComponent)
+        private static bool TryFindDamagedArmor(Item equippedItem, out Item targetItem, out ArmorComponent targetComponent, out string label)
         {
             ArmorComponent armor = equippedItem.GetItemComponent<ArmorComponent>();
             if (armor != null && IsDamaged(armor))
             {
                 targetItem = equippedItem;
                 targetComponent = armor;
+                label = SafeShortName(equippedItem);
                 return true;
             }
 
             ArmorHolderComponent holder = equippedItem.GetItemComponent<ArmorHolderComponent>();
             if (holder != null)
             {
-                // ArmorPlate was ArmorPlateItemClass before 4.1 deobfuscated the client.
-                foreach (ArmorPlate plate in holder.ArmorPlates)
+                // Same walk as holder.ArmorPlates (every ArmorSlot, every ArmorPlate in it), done
+                // by hand so the slot is known for the label. ArmorPlate was ArmorPlateItemClass
+                // before 4.1 deobfuscated the client.
+                foreach (ArmorSlot slot in holder.ArmorSlots)
                 {
-                    ArmorComponent plateArmor = plate.GetItemComponent<ArmorComponent>();
-                    if (plateArmor != null && IsDamaged(plateArmor))
+                    foreach (Item slotItem in slot.Items)
                     {
-                        targetItem = plate;
-                        targetComponent = plateArmor;
-                        return true;
+                        if (!(slotItem is ArmorPlate plate))
+                        {
+                            continue;
+                        }
+
+                        ArmorComponent plateArmor = plate.GetItemComponent<ArmorComponent>();
+                        if (plateArmor != null && IsDamaged(plateArmor))
+                        {
+                            targetItem = plate;
+                            targetComponent = plateArmor;
+                            label = DescribePlate(equippedItem, slot, plate);
+                            return true;
+                        }
                     }
                 }
             }
 
             targetItem = null;
             targetComponent = null;
+            label = null;
             return false;
+        }
+
+        /// <summary>"6B13 앞판(SAPI)" for a removable plate, "6B13 앞 연질" for a built-in
+        /// insert — the insert's own name just repeats the slot.</summary>
+        private static string DescribePlate(Item holderItem, Slot slot, ArmorPlate plate)
+        {
+            string slotName = slot?.ID != null && ArmorSlotNames.TryGetValue(slot.ID, out string ko) ? ko : slot?.ID ?? "?";
+            string holderName = SafeShortName(holderItem);
+
+            return plate is BuiltInInserts
+                ? $"{holderName} {slotName}"
+                : $"{holderName} {slotName}({SafeShortName(plate)})";
+        }
+
+        private static string SafeShortName(Item item)
+        {
+            try
+            {
+                string name = item.LocalizedShortName();
+                if (!string.IsNullOrEmpty(name))
+                {
+                    return name;
+                }
+            }
+            catch (Exception)
+            {
+                // Locale not loaded yet — the template id still tells the log reader what it was.
+            }
+
+            return item.TemplateId.ToString();
+        }
+
+        private static string BuildTickMessage(string label, float before, float after, float oldMax, float newMax,
+            float kitUsed, float kitLeft)
+        {
+            string maxNote = newMax < oldMax - 0.05f ? $" · 최대 {oldMax:0.#}→{newMax:0.#}" : "";
+            string doneNote = after >= newMax - 0.01f ? " · 완료" : "";
+            return $"수리: {label} {before:0.#}→{after:0.#}/{newMax:0.#} (+{after - before:0.#}){maxNote}{doneNote} · 키트 -{kitUsed:0.#} (남음 {kitLeft:0})";
+        }
+
+        /// <summary>The same "repair complete" clip the trader/repair-kit window plays
+        /// (RepairWindow.RepairItem -> GUISounds.PlayUISound(EUISoundType.RepairComplete)).
+        /// GUISounds is created once at app start (ClientApplication) and lives through raids.</summary>
+        private static void PlayRepairSound()
+        {
+            if (!Plugin.PlayRepairSound.Value)
+            {
+                return;
+            }
+
+            try
+            {
+                if (Singleton<GUISounds>.Instantiated)
+                {
+                    Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.RepairComplete);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_loggedSoundFailure)
+                {
+                    _loggedSoundFailure = true;
+                    Plugin.Log.LogWarning("[RaidArmorRepair] 수리 효과음 재생 실패 (수리는 정상 적용됨): " + ex.Message);
+                }
+            }
         }
 
         /// <summary>The 0.01 slack keeps float noise from making a full-durability plate
@@ -439,7 +590,7 @@ namespace RaidArmorRepair
             armor.Repairable.Durability < armor.Repairable.MaxDurability - 0.01f;
 
         private static bool TryFindRepairKit(
-            InventoryEquipment equipment, out Item repairKitItem, out RepairKitComponent kitComponent, bool verboseLog)
+            InventoryEquipment equipment, Item target, out Item repairKitItem, out RepairKitComponent kitComponent, bool verboseLog)
         {
             var carried = new List<Item>();
 
@@ -475,11 +626,35 @@ namespace RaidArmorRepair
             repairKitItem = carried.FirstOrDefault(item =>
             {
                 RepairKitComponent kit = item.GetItemComponent<RepairKitComponent>();
-                return kit != null && kit.Resource > 0f;
+                return kit != null && kit.Resource > 0f && KitCanRepair(item, target);
             });
 
             kitComponent = repairKitItem?.GetItemComponent<RepairKitComponent>();
             return repairKitItem != null;
+        }
+
+        /// <summary>
+        /// Weapon repair kits carry a RepairKitComponent too, so before 1.4.0 a weapon kit was
+        /// happily spent on armour. RepairKit.CanRepair is the vanilla check the repair window
+        /// uses (the kit's repair strategies vs. the item's template). If it throws — globals
+        /// not ready — the kit is allowed rather than blocking every repair.
+        /// </summary>
+        private static bool KitCanRepair(Item kitItem, Item target)
+        {
+            if (target == null || !(kitItem is RepairKit kit))
+            {
+                return true;
+            }
+
+            try
+            {
+                return kit.CanRepair(target);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[RaidArmorRepair] 수리킷 대상 확인 실패, 허용으로 처리: " + ex.Message);
+                return true;
+            }
         }
 
         /// <summary>Everything inside a container, at any depth — a kit in a case in a

@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace RaidArmorRepair
 {
-    [BepInPlugin("com.pineapplelover.raidarmorrepair", "Raid Armor Repair", "1.3.0")]
+    [BepInPlugin("com.pineapplelover.raidarmorrepair", "Raid Armor Repair", "1.4.0")]
     public class Plugin : BaseUnityPlugin
     {
         /// <summary>The objectives panel needs a GamePlayerOwner. It is not always up the
@@ -26,6 +26,8 @@ namespace RaidArmorRepair
         public static ConfigEntry<float> RepairTickInterval;
         public static ConfigEntry<float> IntellectMaxBonusMultiplier;
         public static ConfigEntry<bool> ShowNotifications;
+        public static ConfigEntry<bool> ShowTickDetails;
+        public static ConfigEntry<bool> PlayRepairSound;
         public static ConfigEntry<bool> EnableMaxDurabilityDegradation;
         public static ConfigEntry<float> MaxDurabilityLossAtWorstCase;
         public static ConfigEntry<float> MaxDurabilityLossAtBestCase;
@@ -63,7 +65,13 @@ namespace RaidArmorRepair
                     new AcceptableValueRange<float>(0f, 2f)));
 
             ShowNotifications = Config.Bind("General", "ShowNotifications", true,
-                "수리 시작/종료시 화면 알림 표시 여부");
+                "수리 시작/종료시 화면 알림 표시 여부 (끄면 아래 ShowTickDetails 알림도 같이 꺼집니다)");
+
+            ShowTickDetails = Config.Bind("General", "ShowTickDetails", true,
+                "수리될 때마다 어느 방어구의 어느 부위가 얼마나 수리됐는지(내구도 전→후, 최대내구도 변화, 수리킷 소모/남은 양) 알림으로 표시");
+
+            PlayRepairSound = Config.Bind("General", "PlayRepairSound", true,
+                "수리될 때마다 상인/수리킷으로 수리했을 때 나는 '수리 완료' 효과음을 재생");
 
             EnableMaxDurabilityDegradation = Config.Bind("Degradation", "EnableMaxDurabilityDegradation", true,
                 "수리할 때마다 최대내구도가 함께 감소하는 마모 효과를 사용할지 여부");

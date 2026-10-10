@@ -11,6 +11,9 @@ namespace RaidArmorRepair
 
         public Item TargetArmor;
         public ArmorComponent TargetComponent;
+
+        /// <summary>Human-readable name of what is being repaired, e.g. "6B13 앞판(SAPI)".</summary>
+        public string TargetLabel;
         public Item KitItem;
         public RepairKitComponent KitComponent;
 
