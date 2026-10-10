@@ -20,7 +20,7 @@ namespace RaidArmorRepair
         Allow,
     }
 
-    [BepInPlugin("com.pineapplelover.raidarmorrepair", "레이드 방어구 수리 (Raid Armor Repair)", "1.8.0")]
+    [BepInPlugin("com.pineapplelover.raidarmorrepair", "레이드 방어구 수리 (Raid Armor Repair)", "1.9.0")]
     public class Plugin : BaseUnityPlugin
     {
         /// <summary>The objectives panel needs a GamePlayerOwner. It is not always up the
@@ -37,7 +37,7 @@ namespace RaidArmorRepair
         public static ConfigEntry<float> RepairTickInterval;
         public static ConfigEntry<float> IntellectMaxBonusMultiplier;
         public static ConfigEntry<bool> ShowNotifications;
-        public static ConfigEntry<bool> ShowTickDetails;
+        public static ConfigEntry<bool> DetailedProgress;
         public static ConfigEntry<bool> PlayRepairSound;
         public static ConfigEntry<bool> EnableMaxDurabilityDegradation;
         public static ConfigEntry<float> MaxDurabilityLossAtWorstCase;
@@ -144,15 +144,17 @@ namespace RaidArmorRepair
 
             ShowNotifications = Bind(basic, 50, "General", "ShowNotifications", true,
                 "알림 표시",
-                "수리 시작·종료, 수리킷 없음 같은 화면 오른쪽 위 알림을 보여줄지입니다. 끄면 '수리할 때마다 상세 알림'도 같이 꺼집니다.");
+                "수리 시작·종료, 수리킷 없음 같은 화면 오른쪽 위 알림을 보여줄지입니다. 끄면 진행도 알림도 같이 꺼집니다.");
 
-            ShowTickDetails = Bind(basic, 40, "General", "ShowTickDetails", true,
-                "수리할 때마다 상세 알림",
-                "고칠 때마다 어느 방어구의 어느 부위가 얼마나 고쳐졌는지 알려줍니다.\n예) 수리: 6B13 앞판(SAPI) 31→49/60 (+18) · 최대 64→60 · 키트 -12 (남음 188)");
+            // New key on purpose: the old ShowTickDetails defaulted to on, and a saved "true"
+            // would have kept existing players on the long messages after the default flipped.
+            DetailedProgress = Bind(basic, 40, "General", "DetailedProgress", false,
+                "상세 수리 진행도 표시",
+                "끄면(기본) 진행 상황을 한 줄로만 알려줍니다.\n예) 전체 수리 완료까지: 63%\n켜면 고칠 때마다 어느 부위가 얼마나 고쳐졌는지 자세히 알려줍니다.\n예) 수리: 6B13 앞판(SAPI) 31→49/60 (+18) · 최대 64→60 · 키트 -12 (남음 188)");
 
             PlayRepairSound = Bind(basic, 30, "General", "PlayRepairSound", true,
-                "수리 효과음",
-                "고칠 때마다 메인 화면에서 상인에게 수리받을 때 나는 '수리 완료' 소리를 냅니다.");
+                "수리 완료 효과음",
+                "입고 있는 방어구가 전부 다 고쳐졌을 때 메인 화면에서 상인에게 수리받을 때 나는 '수리 완료' 소리를 한 번 냅니다.");
 
             RepairMotion = Bind(movement, 120, "Movement", "RepairMotion", MotionMultitool,
                 "작업 모션 종류",

@@ -14,6 +14,9 @@ namespace RaidArmorRepair
 
         /// <summary>Human-readable name of what is being repaired, e.g. "6B13 앞판(SAPI)".</summary>
         public string TargetLabel;
+
+        /// <summary>Everything worn, 0-100 — what the one-line progress shows.</summary>
+        public int OverallPercent;
         public Item KitItem;
         public RepairKitComponent KitComponent;
 

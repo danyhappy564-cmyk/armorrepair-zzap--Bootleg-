@@ -98,13 +98,27 @@ namespace RaidArmorRepair
         public static void NotifyRepairStart(Player player)
         {
             ResetSession();
-            Notify(player, $"방어구 수리를 시작합니다. 단축키를 누르고 있으면 {Plugin.RepairTickInterval.Value:0.#}초마다 수리됩니다.");
+
+            // In the one-line mode the immediate first tick reports progress a moment later
+            // anyway, so a separate "started" line would only be noise.
+            if (Plugin.DetailedProgress.Value)
+            {
+                Notify(player, $"방어구 수리를 시작합니다. 단축키를 누르고 있으면 {Plugin.RepairTickInterval.Value:0.#}초마다 수리됩니다.");
+            }
         }
 
         public static void NotifySessionEnd(Player player)
         {
             if (SessionKitResourceUsed <= 0f && SessionDurabilityRepaired <= 0f)
             {
+                return;
+            }
+
+            if (!Plugin.DetailedProgress.Value)
+            {
+                int percent = GetOverallPercent(player.Inventory.Equipment);
+                Notify(player, percent >= 100 ? "방어구 수리 완료" : $"방어구 수리 중단 · 전체 수리 완료까지: {percent}%");
+                ResetSession();
                 return;
             }
 
@@ -239,6 +253,7 @@ namespace RaidArmorRepair
             preview.TargetArmor = targetArmor;
             preview.TargetComponent = armorComponent;
             preview.TargetLabel = label;
+            preview.OverallPercent = GetOverallPercent(equipment);
 
             RepairableComponent repairable = armorComponent.Repairable;
             preview.MaxDurability = repairable.MaxDurability;
@@ -290,6 +305,11 @@ namespace RaidArmorRepair
             if (!preview.HasKit)
             {
                 return "수리킷 없음 {0:F1}";
+            }
+
+            if (!Plugin.DetailedProgress.Value)
+            {
+                return $"전체 수리 완료까지: {preview.OverallPercent}% · " + "{0:F1}s";
             }
 
             float projected = preview.CurrentDurability + preview.ExpectedHeal;
@@ -426,21 +446,103 @@ namespace RaidArmorRepair
 
             Plugin.Debug($"틱 적용: {label} +{heal:0.#} 내구도, 수리킷 -{resourceUsed:0.#}, 지력 보너스 x{intellectMultiplier:0.00}, 최대내구도 -{lossPercent:0.#}%");
 
+            bool moreToRepair = HasAnyDamagedArmor(equipment);
+
             if (heal > 0f)
             {
-                if (Plugin.ShowTickDetails.Value)
+                if (Plugin.DetailedProgress.Value)
                 {
                     Notify(player, BuildTickMessage(label, durabilityBefore, repairable.Durability, maxDurability,
                         repairable.MaxDurability, resourceUsed, kitComponent.Resource));
                 }
+                else if (moreToRepair)
+                {
+                    // The finishing tick stays quiet here; NotifySessionEnd says "완료" right after.
+                    Notify(player, $"전체 수리 완료까지: {GetOverallPercent(equipment)}%");
+                }
 
-                PlayRepairSound();
+                // Field report (1.8.0): one clip per tick was only ever heard on the first tick,
+                // and the player wanted it as a "done" cue anyway — so it plays once, on the tick
+                // that leaves nothing worn damaged.
+                if (!moreToRepair)
+                {
+                    PlayRepairSound();
+                }
             }
 
-            return HasAnyDamagedArmor(equipment);
+            return moreToRepair;
         }
 
         // ---- lookups -------------------------------------------------------
+
+        /// <summary>How intact everything worn is, 0-100: current durability over max
+        /// durability summed across every armour part (the item itself and each plate/insert).
+        /// Floored, and held at 99 while anything is still damaged, so 100 means truly done.</summary>
+        private static int GetOverallPercent(InventoryEquipment equipment)
+        {
+            float current = 0f;
+            float max = 0f;
+
+            try
+            {
+                foreach (ArmorComponent part in EnumerateArmorParts(equipment))
+                {
+                    current += part.Repairable.Durability;
+                    max += part.Repairable.MaxDurability;
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[RaidArmorRepair] 전체 진행도 계산 실패: " + ex.Message);
+                return 0;
+            }
+
+            if (max <= 0f)
+            {
+                return 100;
+            }
+
+            int percent = (int)Math.Floor(Math.Min(1f, current / max) * 100f);
+            return percent >= 100 && HasAnyDamagedArmor(equipment) ? 99 : percent;
+        }
+
+        /// <summary>Every armour part in the worn slots, in the same places
+        /// TryFindDamagedArmor looks.</summary>
+        private static IEnumerable<ArmorComponent> EnumerateArmorParts(InventoryEquipment equipment)
+        {
+            foreach (EquipmentSlot slotId in ArmorSlots)
+            {
+                Item item = equipment.GetSlot(slotId)?.ContainedItem;
+                if (item == null)
+                {
+                    continue;
+                }
+
+                ArmorComponent armor = item.GetItemComponent<ArmorComponent>();
+                if (armor != null)
+                {
+                    yield return armor;
+                }
+
+                ArmorHolderComponent holder = item.GetItemComponent<ArmorHolderComponent>();
+                if (holder == null)
+                {
+                    continue;
+                }
+
+                foreach (ArmorSlot slot in holder.ArmorSlots)
+                {
+                    foreach (Item slotItem in slot.Items)
+                    {
+                        ArmorComponent plateArmor = (slotItem as ArmorPlate)?.GetItemComponent<ArmorComponent>();
+                        if (plateArmor != null)
+                        {
+                            yield return plateArmor;
+                        }
+                    }
+                }
+            }
+        }
 
         private static bool HasAnyDamagedArmor(InventoryEquipment equipment) =>
             TryFindDamagedArmorInEquipment(equipment, out _, out _, out _, false);
