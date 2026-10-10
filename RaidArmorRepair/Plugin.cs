@@ -20,7 +20,7 @@ namespace RaidArmorRepair
         Allow,
     }
 
-    [BepInPlugin("com.pineapplelover.raidarmorrepair", "레이드 방어구 수리 (Raid Armor Repair)", "1.6.0")]
+    [BepInPlugin("com.pineapplelover.raidarmorrepair", "레이드 방어구 수리 (Raid Armor Repair)", "1.7.0")]
     public class Plugin : BaseUnityPlugin
     {
         /// <summary>The objectives panel needs a GamePlayerOwner. It is not always up the
@@ -57,6 +57,22 @@ namespace RaidArmorRepair
             : MoveWhileRepairing.Value == MoveAllow ? MoveWhileRepairingMode.Allow
             : MoveWhileRepairingMode.SlowDown;
         public static ConfigEntry<float> RepairMoveSpeedMultiplier;
+        public static ConfigEntry<bool> UseLegacyRepair;
+        public static ConfigEntry<string> RepairMotion;
+
+        private const string MotionMultitool = "멀티툴로 작업";
+        private const string MotionCrouch = "쪼그려 앉아 작업";
+
+        /// <summary>
+        /// How long one Plant state lasts before the game ends it on its own. The repair key is
+        /// expected to be released long before this; if it is not, MaintainMotion re-enters.
+        /// </summary>
+        private const float MotionPlantTime = 600f;
+
+        /// <summary>The PlantAction we installed, so we only ever end our own Plant state and
+        /// never a vanilla one (generator repair, quest item placing).</summary>
+        private Action<bool> _motionCallback;
+        private Player _motionPlayer;
 
         /// <summary>
         /// Key for our entry in MovementContext's speed-limit table. The game keys that table by
@@ -98,7 +114,7 @@ namespace RaidArmorRepair
             // kept; only what F12 shows (category, name, description, order) is Korean.
             // ConfigurationManager lists higher Order first within a category.
             const string basic = "1. 기본";
-            const string movement = "2. 수리 중 이동";
+            const string movement = "2. 수리 동작 · 이동";
             const string wear = "3. 최대내구도 마모";
 
             RepairKey = Bind(basic, 100, "General", "RepairKey", new KeyboardShortcut(KeyCode.J),
@@ -137,13 +153,22 @@ namespace RaidArmorRepair
                 "수리 효과음",
                 "고칠 때마다 메인 화면에서 상인에게 수리받을 때 나는 '수리 완료' 소리를 냅니다.");
 
+            RepairMotion = Bind(movement, 120, "Movement", "RepairMotion", MotionMultitool,
+                "작업 모션 종류",
+                "수리하는 동안 캐릭터가 할 동작입니다. (발전기 수리·퀘스트 아이템 설치 때와 같은 동작)\n멀티툴로 작업 : 자세는 그대로 두고 손으로 작업하는 동작\n쪼그려 앉아 작업 : 자세를 낮추고 작업하는 동작\n작업 중에는 걸을 수 없고 시야가 좁게 고정됩니다. 키를 떼면 바로 일어납니다.",
+                new AcceptableValueList<string>(MotionMultitool, MotionCrouch));
+
+            UseLegacyRepair = Bind(movement, 110, "Movement", "UseLegacyRepair", false,
+                "레거시 방식 사용 (모션 없음)",
+                "켜면 작업 모션 없이 예전처럼 선 채로 수리합니다. 이때는 아래 '레거시:' 두 설정이 적용됩니다.\n끄면(기본) 작업 모션으로 수리하고, 멈춰 선 상태(서기·앉기)에서만 시작할 수 있습니다.");
+
             MoveWhileRepairing = Bind(movement, 100, "Movement", "MoveWhileRepairing", MoveSlowDown,
-                "수리 중에 움직이면",
+                "레거시: 수리 중에 움직이면",
                 "느리게 걷기 : 천천히 걷기만 되고 달리기는 안 됩니다.\n움직이면 취소 : 걷기·달리기·점프를 하면 수리가 멈춥니다.\n제한 없음 : 평소처럼 자유롭게 움직입니다.",
                 new AcceptableValueList<string>(MoveSlowDown, MoveCancel, MoveAllow));
 
             RepairMoveSpeedMultiplier = Bind(movement, 90, "Movement", "RepairMoveSpeedMultiplier", 0.4f,
-                "느리게 걷기 속도",
+                "레거시: 느리게 걷기 속도",
                 "'느리게 걷기'일 때 평소 최대 걷기 속도의 몇 %까지만 움직일 수 있는지입니다.",
                 new AcceptableValueRange<float>(0.1f, 1f), percent: true);
 
@@ -253,6 +278,14 @@ namespace RaidArmorRepair
         /// </summary>
         private bool ApplyMovementRules(Player player)
         {
+            if (!UseLegacyRepair.Value)
+            {
+                ReleaseSpeedLimit();
+                return MaintainMotion(player);
+            }
+
+            ExitMotion();
+
             switch (MoveMode)
             {
                 case MoveWhileRepairingMode.Cancel:
@@ -274,6 +307,131 @@ namespace RaidArmorRepair
                     ReleaseSpeedLimit();
                     return true;
             }
+        }
+
+        // ---- work motion ---------------------------------------------------------
+
+        /// <summary>
+        /// The Plant state can only be entered from IdlePlayerState (standing or crouched, not
+        /// moving, not prone) — every other state's Plant() is an empty override, so calling it
+        /// anyway would silently do nothing. The vanilla generator repair checks the same thing.
+        /// </summary>
+        private static bool CanStartMotion(Player player)
+        {
+            try
+            {
+                return player.MovementContext?.CurrentState is IdlePlayerState;
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[RaidArmorRepair] 작업 모션 가능 여부 확인 실패: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool IsInPlantState(Player player)
+        {
+            MovementContext movement = player.MovementContext;
+            return movement != null && movement.PlantState != null && movement.CurrentState == movement.PlantState;
+        }
+
+        /// <summary>
+        /// The same call the generator repair (ClientRunddansController.Repair) and the transit
+        /// confirmation make. multitool=true keeps the pose and plays the multitool animation;
+        /// false lowers the pose first and restores it on exit (PlantPlayerState.Enter/Exit).
+        /// </summary>
+        private void EnterMotion(Player player)
+        {
+            try
+            {
+                if (!CanStartMotion(player))
+                {
+                    return;
+                }
+
+                bool multitool = RepairMotion.Value != MotionCrouch;
+                Action<bool> callback = _ => { };
+                player.CurrentManagedState.Plant(true, multitool, MotionPlantTime, callback);
+
+                if (IsInPlantState(player))
+                {
+                    _motionCallback = callback;
+                    _motionPlayer = player;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[RaidArmorRepair] 작업 모션 시작 실패 (모션 없이 수리는 계속됨): " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Keeps the motion going while the key is held. The Plant state blocks walking and
+        /// jumping by itself (its Move/Jump do nothing), so the only ways out are its own timer
+        /// — re-entered here — or something else forcing a state change, which ends the repair
+        /// rather than leaving the player repairing on their feet.
+        /// </summary>
+        private bool MaintainMotion(Player player)
+        {
+            try
+            {
+                if (_motionPlayer == player && IsInPlantState(player))
+                {
+                    return true;
+                }
+
+                if (CanStartMotion(player))
+                {
+                    EnterMotion(player);
+                    return true;
+                }
+
+                if (_motionPlayer == null)
+                {
+                    // The motion never started (an exception in EnterMotion); keep repairing
+                    // without it instead of refusing outright.
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[RaidArmorRepair] 작업 모션 유지 확인 실패: " + ex.Message);
+                return true;
+            }
+
+            RepairService.Notify(player, "작업 자세가 풀려서 방어구 수리를 멈췄습니다.");
+            ResetRepairState();
+            return false;
+        }
+
+        /// <summary>Stands the player back up, but only out of the Plant state we started.</summary>
+        private void ExitMotion()
+        {
+            if (ReferenceEquals(_motionPlayer, null))
+            {
+                return;
+            }
+
+            try
+            {
+                // Leave a dead player's states to the death handling.
+                bool alive = _motionPlayer != null && _motionPlayer.HealthController != null
+                             && _motionPlayer.HealthController.IsAlive;
+                MovementContext movement = alive ? _motionPlayer.MovementContext : null;
+                if (movement != null && movement.CurrentState == movement.PlantState
+                    && ReferenceEquals(movement.PlantAction, _motionCallback))
+                {
+                    movement.PlantAction = null;
+                    movement.ExitOverridenState();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[RaidArmorRepair] 작업 모션 종료 실패: " + ex.Message);
+            }
+
+            _motionPlayer = null;
+            _motionCallback = null;
         }
 
         private static bool IsMoving(Player player)
@@ -413,7 +571,13 @@ namespace RaidArmorRepair
                 return;
             }
 
-            if (MoveMode == MoveWhileRepairingMode.Cancel && IsMoving(player))
+            if (!UseLegacyRepair.Value && !CanStartMotion(player))
+            {
+                RepairService.Notify(player, "작업 모션은 멈춰 선 상태(서기·앉기)에서만 시작할 수 있습니다. 움직이거나 엎드린 상태에서는 멈춘 뒤 다시 눌러주세요.");
+                return;
+            }
+
+            if (UseLegacyRepair.Value && MoveMode == MoveWhileRepairingMode.Cancel && IsMoving(player))
             {
                 RepairService.Notify(player, "움직이는 중에는 수리할 수 없습니다. 멈춘 상태에서 다시 눌러주세요.");
                 return;
@@ -422,6 +586,11 @@ namespace RaidArmorRepair
             RepairService.IsRepairing = true;
             _repairTimer = 0f;
             RepairService.NotifyRepairStart(player);
+
+            if (!UseLegacyRepair.Value)
+            {
+                EnterMotion(player);
+            }
 
             // Field report (2026-09): holding the key felt unresponsive - press it and
             // nothing visibly happens for a full RepairTickInterval. Apply the first tick
@@ -559,6 +728,7 @@ namespace RaidArmorRepair
             _repairTimer = 0f;
             ClosePanel();
             ReleaseSpeedLimit();
+            ExitMotion();
 
             if (wasRepairing && _lastKnownPlayer != null)
             {
