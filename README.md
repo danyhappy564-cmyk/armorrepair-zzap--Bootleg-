@@ -1,8 +1,8 @@
 ### ⚠️ IMPORTANT NOTICE / DISCLAIMER
 
-**Original Author:** RaidArmorRepair author
-**Original Repository:** RaidArmorRepair
-**Original Link:** https://drive.google.com/drive/folders/1_ZyEmQPeDzEZioCpLmk_8d7zNYCJ2dTh?usp=sharing
+**Original Author:** 파인애플애호가 (PineappleLover)
+**Original Repository:** RaidArmorRepair / MiniArmorRepairKit
+**Original Link:** https://arca.live/b/tarkovspt/179689279 (files: https://drive.google.com/drive/folders/1_ZyEmQPeDzEZioCpLmk_8d7zNYCJ2dTh?usp=sharing)
 **License:** No LICENSE file; mod metadata declares MIT
 **This Port By:** R_F (danyhappy564-cmyk) — unofficial, AI-assisted port. Not affiliated with or endorsed by the original author.
 
@@ -14,6 +14,7 @@
 
 ## 변경 이력
 
+- 2026-10-10 21:50 — **릴리즈 준비(4.1 fix4 = 클라 1.9.0)**. 1.9.0 인게임 정상 동작을 사용자가 확인해서, 지난 릴리즈(fix3 = 1.3.0) 이후 바뀐 내용을 묶은 릴리즈 노트 2종을 만들었습니다 — GitHub용 `changelog/RELEASE_NOTES_fix4_GitHub.md`, 아카라이브용 `changelog/RELEASE_NOTES_fix4_Arca.txt`. 서버 모드(야전 수리 키트)는 fix3과 같아서 이번엔 클라이언트만 바뀌었습니다. 위 원작자 표기도 실제 이름(파인애플애호가)과 원본 아카라이브 글로 고쳤습니다.
 - 2026-10-10 21:10 — **1.9.0** 실사용 피드백 반영(로그상 오류 없음 확인 후). ① 효과음이 수리 시작할 때만 들리던 것을 **입고 있는 방어구가 전부 다 고쳐졌을 때 한 번** 나도록 바꿨습니다. ② 오른쪽 알림과 진행 창이 너무 길어서 기본을 **한 줄**로 줄였습니다 — 예) `전체 수리 완료까지: 63%` (입고 있는 방어구 전체의 현재 내구도 합 ÷ 최대 내구도 합). 다 고치면 `방어구 수리 완료`, 중간에 손을 떼면 `방어구 수리 중단 · 전체 수리 완료까지: 85%`. ③ 예전처럼 부위별로 자세히 보고 싶으면 F12 `1. 기본 → 상세 수리 진행도 표시`를 켜면 됩니다(기본 꺼짐). 이전 설정 `수리할 때마다 상세 알림(ShowTickDetails)`은 이걸로 대체됐습니다.
 - 2026-10-10 17:22 — **1.8.0** F12에 `4. 디버그 → 디버그 로그` 추가(기본 꺼짐). 예전에는 수리할 때마다 "어느 슬롯·컨테이너를 봤는지" 기록이 항상 `LogOutput.log`에 쌓였는데, 이제 이 스위치를 켰을 때만 남습니다. 켜면 쓸 수 없어 건너뛴 수리킷(무기 수리킷 등), 매 수리 계산값, 작업 모션 시작·유지·종료와 그때의 캐릭터 상태, 화면 알림 문구까지 기록됩니다. 경고·오류는 스위치와 상관없이 항상 남습니다.
 - 2026-10-10 17:06 — **1.7.0** 수리할 때 **작업 모션**이 나옵니다(기본). 등대 이벤트의 발전기 수리·퀘스트 아이템 설치 때와 같은 동작입니다.
@@ -42,7 +43,7 @@
 
 레이드 중에 방어구를 수리하는 모드. **SPT 4.1.5** 용으로 포팅했습니다.
 
-> **원작: RaidArmorRepair 제작자 ** — 원본 배포 폴더:
+> **원작: 파인애플애호가 (PineappleLover)** — 원본 글: https://arca.live/b/tarkovspt/179689279 / 원본 배포 폴더:
 > https://drive.google.com/drive/folders/1_ZyEmQPeDzEZioCpLmk_8d7zNYCJ2dTh?usp=sharing
 >
 > 이 저장소는 **원작의 SPT 4.1 포팅**입니다. 원작 자체가 아닙니다.
@@ -266,7 +267,7 @@ WTT-ServerCommonLib 의 `SpecialSlotsHelper` 가 정확히 이 두 개를 쓰는
 
 - 빌드: **성공** (1.9.0 클라이언트 확인, 1.4.0 때 두 프로젝트 모두 — 실제 4.1.5 `Assembly-CSharp.dll` 참조로 컴파일. 1.3.0 코드도 이번에 같이 컴파일 확인됨)
 - 서버 기동: **확인됨** (1.2.0 기준) — 아이템 등록까지 정상
-- 인게임 테스트: **1.8.0까지 수리·알림·모션 동작 확인됨(사용자 로그, 2026-10-10)**, **1.9.0은 아직 안 함** — 이상하면 F12 `디버그 로그`를 켜고 한 번 재현한 뒤 `LogOutput.log`를 보내 주세요 — 아래는 코드상 그래야 하는 동작(미검증)입니다
+- 인게임 테스트: **1.9.0 정상 동작 확인됨(사용자, 2026-10-10)** — 1.8.0 로그로 수리·알림·작업 모션, 1.9.0에서 한 줄 진행도·완료 효과음. 레거시 방식(모션 없음)의 이동 규칙 3종은 따로 확인 안 됨 — 이상하면 F12 `디버그 로그`를 켜고 한 번 재현한 뒤 `LogOutput.log`를 보내 주세요 — 아래는 코드상 그래야 하는 동작(미검증)입니다
   - 작업 모션: 게임의 발전기 수리와 같은 상태(`Plant`)를 씁니다. 동작이 자연스러운지, 총을 든 손이 어떻게 보이는지, 키를 뗐을 때 바로 일어나는지는 실제로 봐야 합니다.
   - 감속(레거시): 달리기 키를 누르면 아주 잠깐 달리기 자세가 나왔다가 바로 풀릴 수 있습니다(매 프레임 확인해서 끄는 방식).
   - 효과음: 게임 시작 때 만들어져 레이드 중에도 살아 있는 UI 사운드(`GUISounds`)로 재생합니다. 1.8.0에서 매 수리마다 재생했지만 실제로는 첫 번째만 들렸습니다(원인 미확인 — 같은 소리를 연달아 틀면 게임이 무시하는 것으로 추정). 1.9.0부터는 다 고쳤을 때 한 번만 재생합니다.
