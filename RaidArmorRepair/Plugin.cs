@@ -20,7 +20,7 @@ namespace RaidArmorRepair
         Allow,
     }
 
-    [BepInPlugin("com.pineapplelover.raidarmorrepair", "레이드 방어구 수리 (Raid Armor Repair)", "1.7.0")]
+    [BepInPlugin("com.pineapplelover.raidarmorrepair", "레이드 방어구 수리 (Raid Armor Repair)", "1.8.0")]
     public class Plugin : BaseUnityPlugin
     {
         /// <summary>The objectives panel needs a GamePlayerOwner. It is not always up the
@@ -58,6 +58,7 @@ namespace RaidArmorRepair
             : MoveWhileRepairingMode.SlowDown;
         public static ConfigEntry<float> RepairMoveSpeedMultiplier;
         public static ConfigEntry<bool> UseLegacyRepair;
+        public static ConfigEntry<bool> DebugLog;
         public static ConfigEntry<string> RepairMotion;
 
         private const string MotionMultitool = "멀티툴로 작업";
@@ -195,6 +196,10 @@ namespace RaidArmorRepair
                 "[고급] 재질을 모를 때 쓸 값",
                 "방어구 재질을 알아낼 수 없을 때 대신 쓸 값입니다. 1 = 아라미드(연질 방탄)와 같게 취급. 보통은 건드릴 필요가 없습니다.",
                 new AcceptableValueRange<float>(0.01f, 10f));
+
+            DebugLog = Bind("4. 디버그", 100, "Debug", "DebugLog", false,
+                "디버그 로그",
+                "켜면 수리 과정을 BepInEx/LogOutput.log에 자세히 남깁니다.\n(어느 슬롯·컨테이너를 확인했는지, 찾은 수리킷과 쓸 수 없어 건너뛴 수리킷, 매 수리 계산값, 작업 모션 시작·유지·종료, 알림 문구)\n문제를 제보할 때만 켜고, 평소에는 꺼 두세요.");
 
             Log.LogInfo("Raid Armor Repair loaded.");
 
@@ -346,6 +351,7 @@ namespace RaidArmorRepair
             {
                 if (!CanStartMotion(player))
                 {
+                    Debug($"작업 모션 시작 안 함: 현재 상태 {StateName(player)} (Idle이 아님)");
                     return;
                 }
 
@@ -357,6 +363,11 @@ namespace RaidArmorRepair
                 {
                     _motionCallback = callback;
                     _motionPlayer = player;
+                    Debug($"작업 모션 시작: {(multitool ? MotionMultitool : MotionCrouch)}");
+                }
+                else
+                {
+                    Debug($"작업 모션 요청했지만 Plant 상태가 아님: 현재 상태 {StateName(player)} — 모션 없이 수리 계속");
                 }
             }
             catch (Exception ex)
@@ -382,6 +393,7 @@ namespace RaidArmorRepair
 
                 if (CanStartMotion(player))
                 {
+                    Debug("작업 모션이 풀려 다시 시작 (Plant 시간 만료 등)");
                     EnterMotion(player);
                     return true;
                 }
@@ -399,6 +411,7 @@ namespace RaidArmorRepair
                 return true;
             }
 
+            Debug($"작업 자세가 다른 상태로 바뀜: {StateName(player)} — 수리 종료");
             RepairService.Notify(player, "작업 자세가 풀려서 방어구 수리를 멈췄습니다.");
             ResetRepairState();
             return false;
@@ -423,6 +436,7 @@ namespace RaidArmorRepair
                 {
                     movement.PlantAction = null;
                     movement.ExitOverridenState();
+                    Debug("작업 모션 종료 (일어남)");
                 }
             }
             catch (Exception ex)
@@ -432,6 +446,27 @@ namespace RaidArmorRepair
 
             _motionPlayer = null;
             _motionCallback = null;
+        }
+
+        /// <summary>Writes to LogOutput.log only while the F12 debug switch is on.</summary>
+        internal static void Debug(string message)
+        {
+            if (DebugLog != null && DebugLog.Value)
+            {
+                Log.LogInfo("[RaidArmorRepair][디버그] " + message);
+            }
+        }
+
+        private static string StateName(Player player)
+        {
+            try
+            {
+                return player.MovementContext?.CurrentState?.Name.ToString() ?? "?";
+            }
+            catch (Exception)
+            {
+                return "?";
+            }
         }
 
         private static bool IsMoving(Player player)

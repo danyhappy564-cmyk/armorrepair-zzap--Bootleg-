@@ -340,13 +340,13 @@ namespace RaidArmorRepair
         {
             InventoryEquipment equipment = player.Inventory.Equipment;
 
-            if (!TryFindDamagedArmorInEquipment(equipment, out Item armorItem, out ArmorComponent armorComponent, out string label, true))
+            if (!TryFindDamagedArmorInEquipment(equipment, out Item armorItem, out ArmorComponent armorComponent, out string label, Plugin.DebugLog.Value))
             {
                 Notify(player, "수리할 방어구가 없거나 이미 최대 내구도입니다.");
                 return false;
             }
 
-            if (!TryFindRepairKit(equipment, armorItem, out Item kitItem, out RepairKitComponent kitComponent, true))
+            if (!TryFindRepairKit(equipment, armorItem, out Item kitItem, out RepairKitComponent kitComponent, Plugin.DebugLog.Value))
             {
                 Notify(player, "인벤토리에 사용 가능한 방어구 수리 키트가 없습니다.");
                 return false;
@@ -424,7 +424,7 @@ namespace RaidArmorRepair
                 Plugin.Log.LogWarning("[RaidArmorRepair] 수리킷 RaiseRefreshEvent 실패 (자원은 이미 차감됨): " + ex.Message);
             }
 
-            Plugin.Log.LogInfo($"[RaidArmorRepair] 틱 적용: {label} +{heal:0.#} 내구도, 수리킷 -{resourceUsed:0.#}, 지력 보너스 x{intellectMultiplier:0.00}, 최대내구도 -{lossPercent:0.#}%");
+            Plugin.Debug($"틱 적용: {label} +{heal:0.#} 내구도, 수리킷 -{resourceUsed:0.#}, 지력 보너스 x{intellectMultiplier:0.00}, 최대내구도 -{lossPercent:0.#}%");
 
             if (heal > 0f)
             {
@@ -458,7 +458,7 @@ namespace RaidArmorRepair
 
                 if (verboseLog)
                 {
-                    Plugin.Log.LogInfo($"[RaidArmorRepair] 슬롯 {slotId}: {item.TemplateId} 확인 중...");
+                    Plugin.Debug($"슬롯 {slotId}: {item.TemplateId} 확인 중...");
                 }
 
                 if (TryFindDamagedArmor(item, out targetItem, out targetComponent, out label))
@@ -604,7 +604,7 @@ namespace RaidArmorRepair
 
                 if (verboseLog)
                 {
-                    Plugin.Log.LogInfo($"[RaidArmorRepair] 컨테이너 슬롯 확인: {slotId} -> {container.TemplateId}");
+                    Plugin.Debug($"컨테이너 슬롯 확인: {slotId} -> {container.TemplateId}");
                 }
 
                 CollectAllContainedItems(container, carried);
@@ -612,13 +612,14 @@ namespace RaidArmorRepair
 
             if (verboseLog)
             {
-                Plugin.Log.LogInfo($"[RaidArmorRepair] 컨테이너 내부에서 총 {carried.Count}개 아이템 발견.");
+                Plugin.Debug($"컨테이너 내부에서 총 {carried.Count}개 아이템 발견.");
                 foreach (Item item in carried)
                 {
                     RepairKitComponent kit = item.GetItemComponent<RepairKitComponent>();
                     if (kit != null)
                     {
-                        Plugin.Log.LogInfo($"[RaidArmorRepair]   - 수리킷 발견: {item.TemplateId}, 자원 {kit.Resource}");
+                        string usable = KitCanRepair(item, target) ? "사용 가능" : "이 방어구에 못 씀(무기 수리킷 등) — 건너뜀";
+                        Plugin.Debug($"  - 수리킷 발견: {item.TemplateId}, 자원 {kit.Resource:0.#}, {usable}");
                     }
                 }
             }
@@ -683,12 +684,12 @@ namespace RaidArmorRepair
 
         public static void Notify(Player player, string message)
         {
+            Plugin.Debug("알림: " + message);
+
             if (!Plugin.ShowNotifications.Value)
             {
                 return;
             }
-
-            Plugin.Log.LogInfo(message);
 
             try
             {
