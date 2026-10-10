@@ -9,7 +9,18 @@ using UnityEngine;
 
 namespace RaidArmorRepair
 {
-    [BepInPlugin("com.pineapplelover.raidarmorrepair", "Raid Armor Repair", "1.4.0")]
+    /// <summary>What happens when the player moves while holding the repair key.</summary>
+    public enum MoveWhileRepairingMode
+    {
+        /// <summary>Walk speed is capped and sprint is blocked for as long as the repair runs.</summary>
+        SlowDown,
+        /// <summary>Any movement ends the repair.</summary>
+        Cancel,
+        /// <summary>Movement is not touched (pre-1.5.0 behaviour).</summary>
+        Allow,
+    }
+
+    [BepInPlugin("com.pineapplelover.raidarmorrepair", "Raid Armor Repair", "1.5.0")]
     public class Plugin : BaseUnityPlugin
     {
         /// <summary>The objectives panel needs a GamePlayerOwner. It is not always up the
@@ -33,6 +44,33 @@ namespace RaidArmorRepair
         public static ConfigEntry<float> MaxDurabilityLossAtBestCase;
         public static ConfigEntry<float> WorstCaseReferenceEfficiency;
         public static ConfigEntry<float> DefaultArmorMaterialEfficiency;
+        public static ConfigEntry<MoveWhileRepairingMode> MoveWhileRepairing;
+        public static ConfigEntry<float> RepairMoveSpeedMultiplier;
+
+        /// <summary>
+        /// Key for our entry in MovementContext's speed-limit table. The game keys that table by
+        /// Player.ESpeedLimit, and Add() refuses a cause that is already present, so borrowing one
+        /// of the game's own causes (Armor, Shot, ...) would either be ignored or wipe the game's
+        /// limit on Remove(). An out-of-range value is safe: the table uses EnumHelper's
+        /// comparer, which compares the underlying integers, and the limit is only ever folded in
+        /// as "lowest value wins".
+        /// </summary>
+        private const Player.ESpeedLimit RepairSpeedLimitCause = (Player.ESpeedLimit)0x5241;
+
+        /// <summary>States that count as "moving" for MoveWhileRepairingMode.Cancel.</summary>
+        private static readonly EPlayerState[] MovingStates =
+        {
+            EPlayerState.Run,
+            EPlayerState.Sprint,
+            EPlayerState.ProneMove,
+            EPlayerState.Jump,
+            EPlayerState.Roll,
+            EPlayerState.ClimbOver,
+            EPlayerState.ClimbUp,
+        };
+
+        private Player _slowedPlayer;
+        private float _appliedSpeedLimit;
 
         private float _repairTimer;
         private Player _lastKnownPlayer;
@@ -92,6 +130,13 @@ namespace RaidArmorRepair
                 new ConfigDescription("방어구에서 재질을 읽지 못하거나 표에 없는 재질일 때 사용할 대체 수리 효율값",
                     new AcceptableValueRange<float>(0.01f, 10f)));
 
+            MoveWhileRepairing = Config.Bind("Movement", "MoveWhileRepairing", MoveWhileRepairingMode.SlowDown,
+                "수리 중에 움직이면 어떻게 할지. SlowDown = 느리게 걷기만 가능(달리기 불가), Cancel = 움직이면 수리 중단, Allow = 제한 없음(1.4.0 이전과 동일)");
+
+            RepairMoveSpeedMultiplier = Config.Bind("Movement", "RepairMoveSpeedMultiplier", 0.4f,
+                new ConfigDescription("SlowDown일 때 수리 중 최대 이동 속도 (평소 최대 걷기 속도 대비 비율, 0.4 = 40%)",
+                    new AcceptableValueRange<float>(0.1f, 1f)));
+
             Log.LogInfo("Raid Armor Repair loaded.");
 
             new Harmony("com.pineapplelover.raidarmorrepair").PatchAll();
@@ -130,6 +175,11 @@ namespace RaidArmorRepair
                 return;
             }
 
+            if (!ApplyMovementRules(mainPlayer))
+            {
+                return;
+            }
+
             _repairTimer += Time.deltaTime;
             if (_repairTimer < RepairTickInterval.Value)
             {
@@ -147,6 +197,114 @@ namespace RaidArmorRepair
             {
                 ResetRepairState();
             }
+        }
+
+        /// <summary>
+        /// Runs every frame while a repair is in progress. Returns false when it ended the
+        /// session (Cancel mode and the player moved).
+        /// </summary>
+        private bool ApplyMovementRules(Player player)
+        {
+            switch (MoveWhileRepairing.Value)
+            {
+                case MoveWhileRepairingMode.Cancel:
+                    ReleaseSpeedLimit();
+                    if (IsMoving(player))
+                    {
+                        RepairService.Notify(player, "움직여서 방어구 수리를 멈췄습니다.");
+                        ResetRepairState();
+                        return false;
+                    }
+
+                    return true;
+
+                case MoveWhileRepairingMode.SlowDown:
+                    ApplySpeedLimit(player);
+                    return true;
+
+                default:
+                    ReleaseSpeedLimit();
+                    return true;
+            }
+        }
+
+        private static bool IsMoving(Player player)
+        {
+            try
+            {
+                if (player.IsSprintEnabled)
+                {
+                    return true;
+                }
+
+                EPlayerState state = player.CurrentState?.Name ?? EPlayerState.None;
+                return Array.IndexOf(MovingStates, state) >= 0;
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[RaidArmorRepair] 이동 상태 확인 실패, 정지로 처리: " + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Caps walk speed the same way the game does for overweight (an absolute cap, scaled
+        /// by MovementContext.MaxSpeed), and drops sprint: the speed-limit table only caps the
+        /// walk speed, sprint has its own limit the table does not touch.
+        /// </summary>
+        private void ApplySpeedLimit(Player player)
+        {
+            try
+            {
+                MovementContext movement = player.MovementContext;
+                if (movement == null)
+                {
+                    return;
+                }
+
+                float limit = RepairMoveSpeedMultiplier.Value * movement.MaxSpeed;
+                if (_slowedPlayer != player || Math.Abs(_appliedSpeedLimit - limit) > 0.001f)
+                {
+                    ReleaseSpeedLimit();
+                    movement.AddStateSpeedLimit(limit, RepairSpeedLimitCause);
+                    _slowedPlayer = player;
+                    _appliedSpeedLimit = limit;
+                }
+
+                if (player.IsSprintEnabled)
+                {
+                    player.EnableSprint(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[RaidArmorRepair] 수리 중 이동 속도 제한 실패 (수리는 계속됨): " + ex.Message);
+            }
+        }
+
+        private void ReleaseSpeedLimit()
+        {
+            // Reference check, not Unity's ==: a destroyed player still has to be forgotten here.
+            if (ReferenceEquals(_slowedPlayer, null))
+            {
+                return;
+            }
+
+            try
+            {
+                // Unity's null check: the player object may already be destroyed (raid ended).
+                if (_slowedPlayer != null && _slowedPlayer.MovementContext != null)
+                {
+                    _slowedPlayer.MovementContext.RemoveStateSpeedLimit(RepairSpeedLimitCause);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning("[RaidArmorRepair] 이동 속도 제한 해제 실패: " + ex.Message);
+            }
+
+            _slowedPlayer = null;
+            _appliedSpeedLimit = 0f;
         }
 
         private void TrackOwner(Player mainPlayer)
@@ -204,6 +362,12 @@ namespace RaidArmorRepair
             if (!preview.HasKit)
             {
                 RepairService.Notify(player, "인벤토리에 사용 가능한 방어구 수리 키트가 없습니다.");
+                return;
+            }
+
+            if (MoveWhileRepairing.Value == MoveWhileRepairingMode.Cancel && IsMoving(player))
+            {
+                RepairService.Notify(player, "움직이는 중에는 수리할 수 없습니다. 멈춘 상태에서 다시 눌러주세요.");
                 return;
             }
 
@@ -346,6 +510,7 @@ namespace RaidArmorRepair
             RepairService.IsRepairing = false;
             _repairTimer = 0f;
             ClosePanel();
+            ReleaseSpeedLimit();
 
             if (wasRepairing && _lastKnownPlayer != null)
             {
