@@ -14,6 +14,7 @@
 
 ## 변경 이력
 
+- 2026-10-10 17:00 — **1.6.0** F12 설정 화면 전부 한글화 + 설명을 알아보기 쉽게 다시 씀. 분류도 `1. 기본 / 2. 수리 중 이동 / 3. 최대내구도 마모` 순서로 정리했고, 비율 값은 %로 보입니다. 설정 파일 안 이름은 그대로라 기존 값은 유지됩니다. 단 '수리 중에 움직이면'은 선택지가 한글로 바뀌어서 **1.5.0에서 바꿔둔 경우 기본값(느리게 걷기)으로 한 번 돌아갑니다**.
 - 2026-10-10 16:53 — **1.5.0** 수리 중 움직임 규칙 추가 (F12 `Movement` → `MoveWhileRepairing`)
   - **SlowDown(기본)**: 수리하는 동안 최대 걷기 속도의 40%로만 움직일 수 있고 달리기가 꺼집니다(`RepairMoveSpeedMultiplier`로 조절). 게임이 과적 상태일 때 쓰는 이동 속도 제한 방식을 그대로 씁니다. 수리가 끝나거나 키를 떼면 바로 원래대로 돌아옵니다.
   - **Cancel**: 걷기·달리기·점프·구르기·넘기 중 하나라도 하면 수리가 멈춥니다. 움직이는 중에 J를 누르면 "멈춘 상태에서 다시 눌러주세요"라고 알려줍니다.
@@ -142,37 +143,39 @@ dotnet build ... -c Release -p:SptRoot="D:\내SPT경로"
 
 빌드하면 각각 위 표의 경로로 자동 복사됩니다.
 
-## F12 설정 (`Raid Armor Repair`)
+## F12 설정 (`레이드 방어구 수리 (Raid Armor Repair)`)
 
-**General**
+1.6.0부터 F12 화면은 전부 한글입니다. 설정 파일(`BepInEx/config/com.pineapplelover.raidarmorrepair.cfg`) 안의 이름은 예전 영어 그대로라서 **이전에 바꿔둔 값은 유지됩니다**. 괄호 안이 cfg 파일의 이름입니다.
 
-| 항목 | 기본값 | 설명 |
+**1. 기본**
+
+| F12 이름 | 기본값 | 설명 |
 | --- | --- | --- |
-| `RepairKey` | `J` | 수리 단축키 (누르고 있는 동안 수리) |
-| `RepairPercentPerUse` | `0.3` | 1틱당 회복량 (최대내구도 대비 비율) |
-| `KitResourceCostPerUse` | `20` | 1틱당 소모되는 수리킷 자원 |
-| `RepairTickInterval` | `1` (1.3.0부터, 이전 `5`) | 몇 초마다 한 번 수리할지 — 첫 틱은 키를 누르는 즉시 적용 |
-| `IntellectMaxBonusMultiplier` | `0.5` | 지력 최대일 때 회복량 추가 배율 (+50%) |
-| `ShowNotifications` | `true` | 수리 시작/종료 알림 표시 (끄면 아래 상세 알림도 꺼짐) |
-| `ShowTickDetails` | `true` | 수리될 때마다 부위·내구도 전→후·최대내구도 변화·키트 소모/남은 양 알림 (1.4.0) |
-| `PlayRepairSound` | `true` | 수리될 때마다 상인 수리 완료 효과음 재생 (1.4.0) |
+| 수리 단축키 (`RepairKey`) | `J` | 누르고 있는 동안 입고 있는 방어구를 수리, 떼면 멈춤 |
+| 한 번에 고치는 양 (`RepairPercentPerUse`) | 30% | 한 번에 그 부위 최대내구도의 몇 %를 채울지 |
+| 수리 간격 (초) (`RepairTickInterval`) | 1 | 누르면 바로 한 번, 그 뒤 몇 초마다 다시 고칠지 |
+| 한 번에 쓰는 수리킷 양 (`KitResourceCostPerUse`) | 20 | 한 번을 꽉 채워 고칠 때 쓰는 수리킷 자원 (덜 고치면 덜 씀) |
+| 지력 최대일 때 추가 회복량 (`IntellectMaxBonusMultiplier`) | 50% | 지력 최대면 고치는 양 1.5배, 낮으면 비례해서 감소 |
+| 알림 표시 (`ShowNotifications`) | 켬 | 시작·종료 등 알림 (끄면 상세 알림도 꺼짐) |
+| 수리할 때마다 상세 알림 (`ShowTickDetails`) | 켬 | 어느 부위가 얼마나 고쳐졌는지 |
+| 수리 효과음 (`PlayRepairSound`) | 켬 | 상인 수리 '수리 완료' 소리 |
 
-**Movement** (수리 중 이동, 1.5.0)
+**2. 수리 중 이동**
 
-| 항목 | 기본값 | 설명 |
+| F12 이름 | 기본값 | 설명 |
 | --- | --- | --- |
-| `MoveWhileRepairing` | `SlowDown` | `SlowDown` = 느리게 걷기만(달리기 불가) / `Cancel` = 움직이면 수리 중단 / `Allow` = 제한 없음 |
-| `RepairMoveSpeedMultiplier` | `0.4` | `SlowDown`일 때 최대 이동 속도 (평소 최대 걷기 속도 대비, 0.1~1) |
+| 수리 중에 움직이면 (`MoveWhileRepairing`) | 느리게 걷기 | `느리게 걷기` / `움직이면 취소` / `제한 없음` |
+| 느리게 걷기 속도 (`RepairMoveSpeedMultiplier`) | 40% | 평소 최대 걷기 속도의 몇 %까지 |
 
-**Degradation** (최대내구도 마모)
+**3. 최대내구도 마모**
 
-| 항목 | 기본값 | 설명 |
+| F12 이름 | 기본값 | 설명 |
 | --- | --- | --- |
-| `EnableMaxDurabilityDegradation` | `true` | 수리할 때 최대내구도도 같이 깎을지 |
-| `MaxDurabilityLossAtWorstCase` | `40` | 최악 조건(지력 0 · 저효율 재질)에서 **한 틱을 꽉 채워 고쳤을 때**의 감소율 % (1.4.0부터 덜 고친 틱은 비례해서 덜 깎임) |
-| `MaxDurabilityLossAtBestCase` | `5` | 지력 최대일 때 남는 최소 감소율 % |
-| `WorstCaseReferenceEfficiency` | `0.26` | 위 최악 감소율의 기준이 되는 수리 효율값 (세라믹) |
-| `DefaultArmorMaterialEfficiency` | `1` | 재질을 못 읽었을 때 쓸 대체 효율값 |
+| 수리하면 최대내구도도 줄어듦 (`EnableMaxDurabilityDegradation`) | 켬 | 끄면 최대내구도가 안 줄어듦 |
+| 최대 감소량 (지력 0, 세라믹 기준, %) (`MaxDurabilityLossAtWorstCase`) | 40 | 한 번 꽉 채워 고칠 때. 강철·UHMWPE는 훨씬 덜, 유리는 더 많이 |
+| 최소 감소량 (지력 최대, %) (`MaxDurabilityLossAtBestCase`) | 5 | 지력 최대일 때 감소량 |
+| [고급] 기준 재질 값 (`WorstCaseReferenceEfficiency`) | 0.26 | 위 '최대 감소량'의 기준 재질 (0.26 = 세라믹) |
+| [고급] 재질을 모를 때 쓸 값 (`DefaultArmorMaterialEfficiency`) | 1 | 재질을 못 읽을 때 (1 = 아라미드) |
 
 > 원본 아카챈 설명에는 "현재는 최대내구도가 안 깎인다"고 되어 있었지만,
 > 디컴파일된 코드에는 마모 계산이 들어 있었습니다. 그래서 기능은 살리되

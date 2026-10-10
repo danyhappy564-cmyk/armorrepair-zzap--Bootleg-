@@ -20,7 +20,7 @@ namespace RaidArmorRepair
         Allow,
     }
 
-    [BepInPlugin("com.pineapplelover.raidarmorrepair", "Raid Armor Repair", "1.5.0")]
+    [BepInPlugin("com.pineapplelover.raidarmorrepair", "레이드 방어구 수리 (Raid Armor Repair)", "1.6.0")]
     public class Plugin : BaseUnityPlugin
     {
         /// <summary>The objectives panel needs a GamePlayerOwner. It is not always up the
@@ -44,7 +44,18 @@ namespace RaidArmorRepair
         public static ConfigEntry<float> MaxDurabilityLossAtBestCase;
         public static ConfigEntry<float> WorstCaseReferenceEfficiency;
         public static ConfigEntry<float> DefaultArmorMaterialEfficiency;
-        public static ConfigEntry<MoveWhileRepairingMode> MoveWhileRepairing;
+        public static ConfigEntry<string> MoveWhileRepairing;
+
+        // Stored in the .cfg as-is, so these strings are the saved values — do not reword them
+        // without a migration.
+        private const string MoveSlowDown = "느리게 걷기";
+        private const string MoveCancel = "움직이면 취소";
+        private const string MoveAllow = "제한 없음";
+
+        private static MoveWhileRepairingMode MoveMode =>
+            MoveWhileRepairing.Value == MoveCancel ? MoveWhileRepairingMode.Cancel
+            : MoveWhileRepairing.Value == MoveAllow ? MoveWhileRepairingMode.Allow
+            : MoveWhileRepairingMode.SlowDown;
         public static ConfigEntry<float> RepairMoveSpeedMultiplier;
 
         /// <summary>
@@ -83,63 +94,100 @@ namespace RaidArmorRepair
         {
             Log = Logger;
 
-            RepairKey = Config.Bind("General", "RepairKey",
-                new KeyboardShortcut(KeyCode.J),
-                "레이드 중 방어구를 수리할 단축키 (기본: J). 누르고 있는 동안 계속 수리됩니다.");
+            // The .cfg section/key names stay English so values saved by earlier versions are
+            // kept; only what F12 shows (category, name, description, order) is Korean.
+            // ConfigurationManager lists higher Order first within a category.
+            const string basic = "1. 기본";
+            const string movement = "2. 수리 중 이동";
+            const string wear = "3. 최대내구도 마모";
 
-            RepairPercentPerUse = Config.Bind("General", "RepairPercentPerUse", 0.3f,
-                new ConfigDescription("1틱당 회복되는 최대내구도 대비 비율 (지력 보너스 적용 전 기본값)",
-                    new AcceptableValueRange<float>(0.05f, 1f)));
+            RepairKey = Bind(basic, 100, "General", "RepairKey", new KeyboardShortcut(KeyCode.J),
+                "수리 단축키",
+                "누르고 있는 동안 지금 입고 있는 방어구(방탄복·조끼·헬멧과 그 안의 판)를 수리합니다. 손을 떼면 멈춥니다.");
 
-            KitResourceCostPerUse = Config.Bind("General", "KitResourceCostPerUse", 20f,
-                "1틱당 소모되는 수리킷 자원(Resource) 수치");
+            RepairPercentPerUse = Bind(basic, 90, "General", "RepairPercentPerUse", 0.3f,
+                "한 번에 고치는 양",
+                "한 번 고칠 때 그 부위 최대내구도의 몇 %를 채울지입니다. 지력 보너스는 여기에 더해집니다.\n예) 30% → 최대내구도 60인 판은 한 번에 18 회복",
+                new AcceptableValueRange<float>(0.05f, 1f), percent: true);
 
-            RepairTickInterval = Config.Bind("General", "RepairTickInterval", 1f,
-                new ConfigDescription("단축키를 누르고 있을 때 몇 초마다 한 번씩 수리할지 (첫 틱은 키를 누르는 즉시 적용됩니다)",
-                    new AcceptableValueRange<float>(1f, 30f)));
+            RepairTickInterval = Bind(basic, 80, "General", "RepairTickInterval", 1f,
+                "수리 간격 (초)",
+                "키를 누르면 바로 한 번 고치고, 그 뒤로 몇 초마다 다시 고칠지입니다. 숫자가 클수록 느리게 고쳐집니다.",
+                new AcceptableValueRange<float>(1f, 30f));
 
-            IntellectMaxBonusMultiplier = Config.Bind("General", "IntellectMaxBonusMultiplier", 0.5f,
-                new ConfigDescription("지력(Intellect) 스킬이 최대일 때 1틱 회복량에 추가되는 배율 (0.5 = 최대 +50%)",
-                    new AcceptableValueRange<float>(0f, 2f)));
+            KitResourceCostPerUse = Bind(basic, 70, "General", "KitResourceCostPerUse", 20f,
+                "한 번에 쓰는 수리킷 양",
+                "한 번을 꽉 채워 고칠 때 수리킷 자원을 얼마나 쓸지입니다. 조금만 고치면 그만큼 덜 씁니다.",
+                new AcceptableValueRange<float>(1f, 200f));
 
-            ShowNotifications = Config.Bind("General", "ShowNotifications", true,
-                "수리 시작/종료시 화면 알림 표시 여부 (끄면 아래 ShowTickDetails 알림도 같이 꺼집니다)");
+            IntellectMaxBonusMultiplier = Bind(basic, 60, "General", "IntellectMaxBonusMultiplier", 0.5f,
+                "지력 최대일 때 추가 회복량",
+                "지력 스킬이 최대(51)일 때 한 번에 고치는 양이 얼마나 늘어나는지입니다. 지력이 낮으면 비례해서 줄어듭니다.\n예) 50% → 지력 최대면 1.5배, 지력 25쯤이면 약 1.25배",
+                new AcceptableValueRange<float>(0f, 2f), percent: true);
 
-            ShowTickDetails = Config.Bind("General", "ShowTickDetails", true,
-                "수리될 때마다 어느 방어구의 어느 부위가 얼마나 수리됐는지(내구도 전→후, 최대내구도 변화, 수리킷 소모/남은 양) 알림으로 표시");
+            ShowNotifications = Bind(basic, 50, "General", "ShowNotifications", true,
+                "알림 표시",
+                "수리 시작·종료, 수리킷 없음 같은 화면 오른쪽 위 알림을 보여줄지입니다. 끄면 '수리할 때마다 상세 알림'도 같이 꺼집니다.");
 
-            PlayRepairSound = Config.Bind("General", "PlayRepairSound", true,
-                "수리될 때마다 상인/수리킷으로 수리했을 때 나는 '수리 완료' 효과음을 재생");
+            ShowTickDetails = Bind(basic, 40, "General", "ShowTickDetails", true,
+                "수리할 때마다 상세 알림",
+                "고칠 때마다 어느 방어구의 어느 부위가 얼마나 고쳐졌는지 알려줍니다.\n예) 수리: 6B13 앞판(SAPI) 31→49/60 (+18) · 최대 64→60 · 키트 -12 (남음 188)");
 
-            EnableMaxDurabilityDegradation = Config.Bind("Degradation", "EnableMaxDurabilityDegradation", true,
-                "수리할 때마다 최대내구도가 함께 감소하는 마모 효과를 사용할지 여부");
+            PlayRepairSound = Bind(basic, 30, "General", "PlayRepairSound", true,
+                "수리 효과음",
+                "고칠 때마다 메인 화면에서 상인에게 수리받을 때 나는 '수리 완료' 소리를 냅니다.");
 
-            MaxDurabilityLossAtWorstCase = Config.Bind("Degradation", "MaxDurabilityLossAtWorstCase", 40f,
-                new ConfigDescription("지력 0 · 수리 효율이 WorstCaseReferenceEfficiency일 때의 최대내구도 감소율(%)",
-                    new AcceptableValueRange<float>(0f, 100f)));
+            MoveWhileRepairing = Bind(movement, 100, "Movement", "MoveWhileRepairing", MoveSlowDown,
+                "수리 중에 움직이면",
+                "느리게 걷기 : 천천히 걷기만 되고 달리기는 안 됩니다.\n움직이면 취소 : 걷기·달리기·점프를 하면 수리가 멈춥니다.\n제한 없음 : 평소처럼 자유롭게 움직입니다.",
+                new AcceptableValueList<string>(MoveSlowDown, MoveCancel, MoveAllow));
 
-            MaxDurabilityLossAtBestCase = Config.Bind("Degradation", "MaxDurabilityLossAtBestCase", 5f,
-                new ConfigDescription("지력이 최대(51)일 때 남는 최소 감소율(%). 재질/효율과 무관하게 이 값 밑으로는 내려가지 않습니다",
-                    new AcceptableValueRange<float>(0f, 100f)));
+            RepairMoveSpeedMultiplier = Bind(movement, 90, "Movement", "RepairMoveSpeedMultiplier", 0.4f,
+                "느리게 걷기 속도",
+                "'느리게 걷기'일 때 평소 최대 걷기 속도의 몇 %까지만 움직일 수 있는지입니다.",
+                new AcceptableValueRange<float>(0.1f, 1f), percent: true);
 
-            WorstCaseReferenceEfficiency = Config.Bind("Degradation", "WorstCaseReferenceEfficiency", 0.26f,
-                new ConfigDescription("MaxDurabilityLossAtWorstCase 감소율의 기준이 되는 수리 효율 값",
-                    new AcceptableValueRange<float>(0.01f, 10f)));
+            EnableMaxDurabilityDegradation = Bind(wear, 100, "Degradation", "EnableMaxDurabilityDegradation", true,
+                "수리하면 최대내구도도 줄어듦",
+                "상인 수리처럼 고칠 때마다 최대내구도가 조금씩 줄어듭니다. 끄면 몇 번을 고쳐도 최대내구도가 그대로입니다.");
 
-            DefaultArmorMaterialEfficiency = Config.Bind("Degradation", "DefaultArmorMaterialEfficiency", 1f,
-                new ConfigDescription("방어구에서 재질을 읽지 못하거나 표에 없는 재질일 때 사용할 대체 수리 효율값",
-                    new AcceptableValueRange<float>(0.01f, 10f)));
+            MaxDurabilityLossAtWorstCase = Bind(wear, 90, "Degradation", "MaxDurabilityLossAtWorstCase", 40f,
+                "최대 감소량 (지력 0, 세라믹 기준, %)",
+                "지력 0으로 세라믹 판을 한 번 꽉 채워 고칠 때 최대내구도가 몇 % 줄어들지입니다.\n튼튼한 재질(강철·UHMWPE)은 훨씬 덜 줄고, 유리는 더 많이 줄어듭니다. 조금만 고치면 그만큼 덜 줄어듭니다.",
+                new AcceptableValueRange<float>(0f, 100f));
 
-            MoveWhileRepairing = Config.Bind("Movement", "MoveWhileRepairing", MoveWhileRepairingMode.SlowDown,
-                "수리 중에 움직이면 어떻게 할지. SlowDown = 느리게 걷기만 가능(달리기 불가), Cancel = 움직이면 수리 중단, Allow = 제한 없음(1.4.0 이전과 동일)");
+            MaxDurabilityLossAtBestCase = Bind(wear, 80, "Degradation", "MaxDurabilityLossAtBestCase", 5f,
+                "최소 감소량 (지력 최대, %)",
+                "지력이 최대(51)일 때 줄어드는 양입니다. 재질과 상관없이 한 번 꽉 채워 고치면 최소 이만큼은 줄어듭니다.",
+                new AcceptableValueRange<float>(0f, 100f));
 
-            RepairMoveSpeedMultiplier = Config.Bind("Movement", "RepairMoveSpeedMultiplier", 0.4f,
-                new ConfigDescription("SlowDown일 때 수리 중 최대 이동 속도 (평소 최대 걷기 속도 대비 비율, 0.4 = 40%)",
-                    new AcceptableValueRange<float>(0.1f, 1f)));
+            WorstCaseReferenceEfficiency = Bind(wear, 70, "Degradation", "WorstCaseReferenceEfficiency", 0.26f,
+                "[고급] 기준 재질 값",
+                "'최대 감소량'이 어떤 재질 기준인지 정하는 값입니다. 0.26 = 세라믹. 보통은 건드릴 필요가 없습니다.\n(재질별 값: 유리 0.15 · 세라믹 0.26 · 복합 0.4 · 티타늄/알루미늄 0.63 · 아라미드 1 · 강철/UHMWPE 3)",
+                new AcceptableValueRange<float>(0.01f, 10f));
+
+            DefaultArmorMaterialEfficiency = Bind(wear, 60, "Degradation", "DefaultArmorMaterialEfficiency", 1f,
+                "[고급] 재질을 모를 때 쓸 값",
+                "방어구 재질을 알아낼 수 없을 때 대신 쓸 값입니다. 1 = 아라미드(연질 방탄)와 같게 취급. 보통은 건드릴 필요가 없습니다.",
+                new AcceptableValueRange<float>(0.01f, 10f));
 
             Log.LogInfo("Raid Armor Repair loaded.");
 
             new Harmony("com.pineapplelover.raidarmorrepair").PatchAll();
+        }
+
+        private ConfigEntry<T> Bind<T>(string category, int order, string section, string key, T defaultValue,
+            string displayName, string description, AcceptableValueBase acceptable = null, bool percent = false)
+        {
+            var attributes = new ConfigurationManagerAttributes
+            {
+                Category = category,
+                Order = order,
+                DispName = displayName,
+                ShowRangeAsPercent = percent ? true : (bool?)null,
+            };
+
+            return Config.Bind(section, key, defaultValue, new ConfigDescription(description, acceptable, attributes));
         }
 
         private void Update()
@@ -205,7 +253,7 @@ namespace RaidArmorRepair
         /// </summary>
         private bool ApplyMovementRules(Player player)
         {
-            switch (MoveWhileRepairing.Value)
+            switch (MoveMode)
             {
                 case MoveWhileRepairingMode.Cancel:
                     ReleaseSpeedLimit();
@@ -365,7 +413,7 @@ namespace RaidArmorRepair
                 return;
             }
 
-            if (MoveWhileRepairing.Value == MoveWhileRepairingMode.Cancel && IsMoving(player))
+            if (MoveMode == MoveWhileRepairingMode.Cancel && IsMoving(player))
             {
                 RepairService.Notify(player, "움직이는 중에는 수리할 수 없습니다. 멈춘 상태에서 다시 눌러주세요.");
                 return;
