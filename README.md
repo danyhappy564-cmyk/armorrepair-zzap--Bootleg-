@@ -1,10 +1,10 @@
 ### ⚠️ IMPORTANT NOTICE / DISCLAIMER
 
-**Original Author:** 파인애플애호가 (PineappleLover)
-**Original Repository:** RaidArmorRepair / MiniArmorRepairKit
-**Original Link:** https://arca.live/b/tarkovspt/179689279 (files: https://drive.google.com/drive/folders/1_ZyEmQPeDzEZioCpLmk_8d7zNYCJ2dTh?usp=sharing)
-**License:** No LICENSE file; mod metadata declares MIT
-**This Port By:** R_F (danyhappy564-cmyk) — unofficial, AI-assisted port. Not affiliated with or endorsed by the original author.
+- **Original Author:** 파인애플애호가 (PineappleLover)
+- **Original Repository:** RaidArmorRepair / MiniArmorRepairKit
+- **Original Link:** https://arca.live/b/tarkovspt/179689279 (files: https://drive.google.com/drive/folders/1_ZyEmQPeDzEZioCpLmk_8d7zNYCJ2dTh?usp=sharing)
+- **License:** No LICENSE file; mod metadata declares MIT
+- **This Port By:** R_F (danyhappy564-cmyk) — unofficial, AI-assisted port. Not affiliated with or endorsed by the original author.
 
 1. **Reflection & Take-Downs:** I deeply reflect on the ECOT incident. As an AI-assisted "vibe coder," I will immediately delete files if the original authors ask.
 2. **No Re-Distribution:** These ported builds are unverified, temporary fixes. Please do NOT re-upload or share them anywhere else.
@@ -14,6 +14,7 @@
 
 ## 변경 이력
 
+- 2026-10-13 04:38 — README 맨 위 원작자 표기를 한 줄씩 나눠 보기 쉽게 정리 (내용 변화 없음)
 - 2026-10-10 21:50 — **릴리즈 준비(4.1 fix4 = 클라 1.9.0)**. 1.9.0 인게임 정상 동작을 사용자가 확인해서, 지난 릴리즈(fix3 = 1.3.0) 이후 바뀐 내용을 묶은 릴리즈 노트 2종을 만들었습니다 — GitHub용 `changelog/RELEASE_NOTES_fix4_GitHub.md`, 아카라이브용 `changelog/RELEASE_NOTES_fix4_Arca.txt`. 서버 모드(야전 수리 키트)는 fix3과 같아서 이번엔 클라이언트만 바뀌었습니다. 위 원작자 표기도 실제 이름(파인애플애호가)과 원본 아카라이브 글로 고쳤습니다.
 - 2026-10-10 21:10 — **1.9.0** 실사용 피드백 반영(로그상 오류 없음 확인 후). ① 효과음이 수리 시작할 때만 들리던 것을 **입고 있는 방어구가 전부 다 고쳐졌을 때 한 번** 나도록 바꿨습니다. ② 오른쪽 알림과 진행 창이 너무 길어서 기본을 **한 줄**로 줄였습니다 — 예) `전체 수리 완료까지: 63%` (입고 있는 방어구 전체의 현재 내구도 합 ÷ 최대 내구도 합). 다 고치면 `방어구 수리 완료`, 중간에 손을 떼면 `방어구 수리 중단 · 전체 수리 완료까지: 85%`. ③ 예전처럼 부위별로 자세히 보고 싶으면 F12 `1. 기본 → 상세 수리 진행도 표시`를 켜면 됩니다(기본 꺼짐). 이전 설정 `수리할 때마다 상세 알림(ShowTickDetails)`은 이걸로 대체됐습니다.
 - 2026-10-10 17:22 — **1.8.0** F12에 `4. 디버그 → 디버그 로그` 추가(기본 꺼짐). 예전에는 수리할 때마다 "어느 슬롯·컨테이너를 봤는지" 기록이 항상 `LogOutput.log`에 쌓였는데, 이제 이 스위치를 켰을 때만 남습니다. 켜면 쓸 수 없어 건너뛴 수리킷(무기 수리킷 등), 매 수리 계산값, 작업 모션 시작·유지·종료와 그때의 캐릭터 상태, 화면 알림 문구까지 기록됩니다. 경고·오류는 스위치와 상관없이 항상 남습니다.
